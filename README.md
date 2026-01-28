@@ -29,6 +29,15 @@ This is the backend for the Play application, built with [NestJS](https://nestjs
 
 This project is developed for **CS 125**. It serves as the API handle for the furniture recommendation engine, managing user contexts and processing recommendation logic.
 
+## Development Notes
+
+### January 27, 2026
+- Initial setup complete with two main entities: `Advocate` and `Furniture`
+- Business logic for `/furniture/search` endpoint is not yet implemented
+- Front-end is currently pointing to `/furniture/search-all` which returns the first 20 items without filtering
+- CSV data migration script created (`npm run seed`) to import furniture data into SQLite database
+- **TODO**: Implement proper search filtering logic based on user preferences (type, style, dimensions)
+
 ## Getting Started
 
 ### 1. Install dependencies
