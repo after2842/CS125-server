@@ -1,0 +1,17 @@
+import { Controller, Get, Put, Body, Req, UseGuards } from '@nestjs/common';
+import { UserService } from './user.service';
+
+@Controller('user')
+export class UserController {
+  constructor(private readonly userService: UserService) {}
+
+  @Get('test')
+  async test(@Req() req: any) {
+    return this.userService.test(req.session.sessionId);
+  }
+
+  //   @Get('test-authProfile')
+  //   async login(@Req() req:any, @Body() body: { email: string}) {
+  //     return this.userService.login(body.email, body.password);
+  //   }
+}

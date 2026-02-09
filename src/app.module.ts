@@ -5,7 +5,8 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AdvocatesModule } from './advocates/advocates.module';
 import { FurnitureModule } from './furniture/furniture.module';
-
+import { UserModule } from './user/user.module';
+import { AuthModule } from './auth/auth.module';
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -18,8 +19,10 @@ import { FurnitureModule } from './furniture/furniture.module';
       autoLoadEntities: true, //
       synchronize: true, //
     }),
-    AdvocatesModule, // 👈 load your feature module
+    AdvocatesModule,
+    AuthModule,
     FurnitureModule,
+    UserModule,
   ],
   controllers: [AppController],
   providers: [AppService],
