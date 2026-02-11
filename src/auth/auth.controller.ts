@@ -51,7 +51,7 @@ export class AuthController {
     const userId = req.session.userId as number | undefined;
     if (!userId) throw new UnauthorizedException();
 
-    const user = await this.authService.getSafeUserById(userId);
+    const user = await this.authService.getSafeUserById(userId); // user object may contain confidential info
     return { user };
   }
 
