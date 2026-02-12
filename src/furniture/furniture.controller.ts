@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { FurnitureService } from './furniture.service';
 
 @Controller('furniture')
@@ -16,7 +16,13 @@ export class FurnitureController {
   }
 
   @Get(':id')
-  findOne(@Query('id') id: string) {
+  findOne(@Param('id') id: string) {
     return this.furnitureService.findOne(+id);
   }
+  
+  @Post('recommend')
+  recommend(@Body() body: any) {
+    return this.furnitureService.recommend(body);
+  }
 }
+
