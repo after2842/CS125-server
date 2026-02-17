@@ -2,44 +2,69 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
 import { Furniture } from './furniture.entity';
-
+import { IntentService } from '../search/intent.service';
 @Injectable()
 export class FurnitureService {
   constructor(
     @InjectRepository(Furniture)
     private readonly repo: Repository<Furniture>,
+    private readonly intentService: IntentService,
   ) {}
 
-  async search({ query = '', category = '', page = 1, limit = 10 }) {
-    query = query.trim();
+  async search(query: any) {
+    console.log('Search endpoint called', query);
+    const title = query?.title.trim();
+    const length = query?.length;
+    console.log(title, length, 'query');
 
-    const where: any = [];
+    const dsl: any = {
+      _source: [
+        'title',
+        'description',
+        'url',
+        'image_urls',
+        'price_min',
+        'price_max',
+      ],
+      query: {
+        bool: {
+          must: [
+            {
+              match: {
+                title: {
+                  query: title,
+                  operator: 'and', // ensures all words appear in title
+                },
+              },
+            },
+          ],
+          filter: [],
+        },
+      },
+    };
 
-    if (query && category) {
-      // Search by query AND category
-      where.push(
-        { name: ILike(`%${query}%`), category: ILike(`%${category}%`) },
-        { designer: ILike(`%${query}%`), category: ILike(`%${category}%`) },
-      );
-    } else if (query) {
-      // Search by query only
-      where.push(
-        { name: ILike(`%${query}%`) },
-        { designer: ILike(`%${query}%`) },
-      );
-    } else if (category) {
-      // Filter by category only
-      where.push({ category: ILike(`%${category}%`) });
+    const res = await fetch(
+      `${process.env.OPENSEARCH_URL}/products_v1/_search`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dsl),
+      },
+    );
+    if (!res.ok) {
+      console.log(res.status, 'not ok');
+      const txt = await res.text();
+      throw new Error(`OpenSearch error ${res.status}: ${txt.slice(0, 500)}`);
     }
+    const data = await res.json();
 
-    const [items, total] = await this.repo.findAndCount({
-      where: where.length > 0 ? where : undefined,
-      take: limit,
-      skip: (page - 1) * limit,
-      order: { id: 'ASC' },
-    });
+    return data.hits.hits.map((h: any) => ({
+      id: h._id,
+      score: h._score,
+      ...h._source,
+    }));
 
-    return { items, total, page, limit };
+    // return await this.intentService.toSearchIntent(query);
   }
 
   async findAll() {

@@ -67,18 +67,23 @@ export class AuthService {
   // --- Login credential check ---
   async validateCredentials(email: string, password: string) {
     const normalizedEmail = email.trim().toLowerCase();
-
+    console.log(normalizedEmail);
     // passwordHash is select:false, so we must explicitly select it here
     const user = await this.users
       .createQueryBuilder('u')
       .addSelect('u.passwordHash')
       .where('u.email = :email', { email: normalizedEmail })
       .getOne();
-
+    if (!user) {
+      console.log('not found user');
+    } else console.log(user?.name, 'is logged in');
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
     const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) throw new UnauthorizedException('Invalid credentials');
+    if (!ok) {
+      console.log('password mismatch');
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     return this.toSafeUser(user); //toSafeUser will block fetching passwordHash.
     // Even though passwordHash is not fetchable by default ({select: false})
@@ -92,7 +97,7 @@ export class AuthService {
     await new Promise<void>((resolve, reject) => {
       req.session.regenerate((err: any) => (err ? reject(err) : resolve()));
     });
-
+    console.log('establishsession: ', userId);
     req.session.userId = userId;
     req.session.authAt = Date.now();
 
@@ -110,12 +115,13 @@ export class AuthService {
 
   private toSafeUser(user: User) {
     // passwordHash is usually not present due to select:false, but never return it anyway
+    console.log('tosafeuser called');
     return {
       id: user.id,
       email: user.email,
       name: user.name,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
+      // createdAt: user.createdAt,
+      // updatedAt: user.updatedAt,
     };
   }
 }

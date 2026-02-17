@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { FurnitureService } from './furniture.service';
-
+import { SessionAuthGuard } from 'src/auth/session-auth.guard';
+import { UseGuards } from '@nestjs/common';
 @Controller('furniture')
 export class FurnitureController {
   constructor(private readonly furnitureService: FurnitureService) {}
 
+  // @UseGuards(SessionAuthGuard)
   @Get('search')
   search(@Query() query: any) {
     return this.furnitureService.search(query);

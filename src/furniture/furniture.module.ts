@@ -3,9 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { FurnitureController } from './furniture.controller';
 import { FurnitureService } from './furniture.service';
 import { Furniture } from './furniture.entity';
+import { SearchModule } from '../search/search.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Furniture])],
+  imports: [TypeOrmModule.forFeature([Furniture]), SearchModule],
   controllers: [FurnitureController],
   providers: [FurnitureService],
 })
