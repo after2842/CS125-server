@@ -41,6 +41,8 @@ export class AuthController {
     );
 
     await this.authService.establishSession(req, user.id);
+    console.log('Session ID after establish:', req.sessionID);
+    console.log(' Session data:', req.session);
 
     return { message: 'Login successful', user };
   }
