@@ -16,8 +16,8 @@ export class FurnitureService {
     const title = query?.title.trim();
     const length = query?.length;
     console.log(title, length, 'query');
-    const embedding = await this.intentService.embedQuery(title);
-    console.log(embedding, 'embedding!');
+    //const embedding = await this.intentService.embedQuery(title);
+    //console.log(embedding, 'embedding!');
     const dsl: any = {
       size: 20,
       _source: { exclude: ['title_embedding', 'description_embedding'] },
