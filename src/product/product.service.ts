@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
-import { Furniture } from './furniture.entity';
+import { Product } from './product.entity';
 import { IntentService } from '../search/intent.service';
 @Injectable()
-export class FurnitureService {
+export class ProductService {
   constructor(
-    @InjectRepository(Furniture)
-    private readonly repo: Repository<Furniture>,
+    @InjectRepository(Product)
+    private readonly repo: Repository<Product>,
     private readonly intentService: IntentService,
   ) {}
 
@@ -20,7 +20,8 @@ export class FurnitureService {
     //console.log(embedding, 'embedding!');
     const dsl: any = {
       size: 20,
-      _source: { exclude: ['title_embedding', 'description_embedding'] },
+
+      // _source: { exclude: ['title_embedding', 'description_embedding'] },
       query: {
         multi_match: {
           query: title,
@@ -68,6 +69,8 @@ export class FurnitureService {
       console.log(res.status, 'not ok');
       const txt = await res.text();
       throw new Error(`OpenSearch error ${res.status}: ${txt.slice(0, 500)}`);
+    } else {
+      console.log('good fetch!');
     }
     const data = await res.json();
 
@@ -76,8 +79,6 @@ export class FurnitureService {
       score: h._score,
       ...h._source,
     }));
-
-    // return await this.intentService.toSearchIntent(query);
   }
 
   async findReview(query: any) {

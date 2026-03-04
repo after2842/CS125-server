@@ -3,30 +3,37 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { AdvocatesModule } from './advocates/advocates.module';
-import { FurnitureModule } from './furniture/furniture.module';
-import { UserModule } from './user/user.module';
+
+import { ProductModule } from './product/product.module';
+import { UserModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { SupabaseModule } from './supabase/supabase.module';
+const supabaseDirectUrl = process.env.SUPABASE_DIRECT_URL;
+console.log(supabaseDirectUrl);
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    TypeOrmModule.forRoot({
-      type: 'sqlite', // or "sqlite"
-      // host: 'localhost',
-      // port: 5432,
-      // username: 'postgres',
-      // password: 'postgres',
-      database: 'play.db',
-      autoLoadEntities: true, //
-      synchronize: true, //
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const url = configService.get('SUPABASE_DIRECT_URL');
+        console.log('Connecting to DB with URL:', url);
+        return {
+          type: 'postgres',
+          url: configService.get('SUPABASE_DIRECT_URL'),
+          autoLoadEntities: true,
+          synchronize: false,
+        };
+      },
     }),
-    AdvocatesModule,
     AuthModule,
-    FurnitureModule,
+    ProductModule,
     UserModule,
+    SupabaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],

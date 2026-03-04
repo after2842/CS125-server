@@ -1,7 +1,7 @@
 import { Entity, Column, PrimaryGeneratedColumn, Index } from 'typeorm';
 
 @Entity()
-export class Furniture {
+export class Product {
   @PrimaryGeneratedColumn()
   id: number;
 
@@ -14,19 +14,22 @@ export class Furniture {
   category: string;
 
   @Column('decimal', { precision: 10, scale: 2 })
-  price: number;
+  price_min: number;
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  price_max: number;
 
   @Column()
   link: string;
 
   @Column({ type: 'text', nullable: true })
-  short_description?: string;
+  description?: string;
 
-  @Column({ nullable: true })
-  designer?: string;
+  @Column({ type: 'text', nullable: true })
+  merchant?: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  height?: number;
+  @Column({ type: 'text', nullable: true })
+  color?: number;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   width?: number;

@@ -2,97 +2,106 @@ import {
   ConflictException,
   Injectable,
   UnauthorizedException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import type { Request } from 'express';
-
-import { User } from '../user/user.entity';
-import { SignupDto } from './auth.dto';
-
+import { Auth } from './auth.entity';
+import { LoginDto, SignupDto } from './auth.dto';
+import { SupabaseService } from 'src/supabase/supabase.service';
+import { Users } from 'src/users/users.entity';
+import { ExceptionsHandler } from '@nestjs/core/exceptions/exceptions-handler';
+import { no } from 'zod/v4/locales';
 type AuthedRequest = Request & { session: any };
 
 @Injectable()
 export class AuthService {
-  constructor(
-    @InjectRepository(User) private readonly users: Repository<User>,
-  ) {}
-
+  constructor(private readonly SupabaseService: SupabaseService) {}
   // --- Signup (writes to DB) ---
-  async signup(dto: SignupDto) {
+  async signupStart(dto: SignupDto) {
     const normalizedEmail = dto.email.trim().toLowerCase();
+    try {
+      const data = await this.SupabaseService.signUp(
+        normalizedEmail,
+        dto.password,
+      );
+
+      if (data.user) {
+        return { message: 'Verification email sent. Please check your inbox.' };
+      } else {
+        throw new InternalServerErrorException('Interneral error');
+      }
+    } catch {
+      throw new ConflictException(
+        'This email may already be in use, or an internal error occurred.',
+      );
+    }
 
     // pre-check before the db schema level check
     // faster err response to the user | looks more normal? err
-    const exists = await this.users.exists({
-      where: { email: normalizedEmail },
-    });
-    if (exists) {
-      throw new ConflictException({
-        code: 'EMAIL_TAKEN',
-        field: 'email',
-        message: 'Email already exists',
-      });
-    }
+  }
 
-    const passwordHash = await bcrypt.hash(dto.password, 12);
-
+  // --- Signup (writes to DB) ---
+  async signupVerify(dto: SignupDto) {
+    console.log('singup verify /');
+    const normalizedEmail = dto.email.trim().toLowerCase();
     try {
-      const newUser = this.users.create({
-        email: normalizedEmail,
-        passwordHash,
-        name: dto.name.trim(),
-      });
-
-      const saved = await this.users.save(newUser); //DB write
-      return this.toSafeUser(saved);
-    } catch (err: any) {
-      // DB-level check fails
-      const code = err?.code ?? err?.driverError?.code;
-      if (
-        code === '23505' || //postgresql err code
-        code === 'SQLITE_CONSTRAINT'
-      ) {
-        throw new ConflictException({
-          code: 'EMAIL_TAKEN',
-          field: 'email',
-          message: 'Email already exists',
-        });
+      // pre-check before the db schema level check
+      // faster err response to the user | looks more normal? err
+      const data = await this.SupabaseService.verifyOtp(
+        normalizedEmail,
+        dto.code,
+        'email',
+      );
+      if (data.user) {
+        // otp is correct
+        const { data, error } = await this.SupabaseService.getClient() // we retrieve that specific row, because now the row for this user is a complete row of Users(and also verified )
+          .from('users')
+          .insert({ email: normalizedEmail, name: dto.name })
+          .select()
+          .single();
+        if (error) {
+          throw new InternalServerErrorException(error);
+        }
+        return data.user;
+      } else {
+        throw new UnauthorizedException('Wrong OTP');
       }
-      throw err;
+    } catch (error) {
+      throw new InternalServerErrorException(error);
     }
   }
 
   // --- Login credential check ---
-  async validateCredentials(email: string, password: string) {
-    const normalizedEmail = email.trim().toLowerCase();
-    console.log(normalizedEmail);
+  async validateCredentials(dto: LoginDto) {
+    const normalizedEmail = dto.email.trim().toLowerCase();
     // passwordHash is select:false, so we must explicitly select it here
-    const user = await this.users
-      .createQueryBuilder('u')
-      .addSelect('u.passwordHash')
-      .where('u.email = :email', { email: normalizedEmail })
-      .getOne();
-    if (!user) {
-      console.log('not found user');
-    } else console.log(user?.name, 'is logged in');
-    if (!user) throw new UnauthorizedException('Invalid credentials');
-
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) {
-      console.log('password mismatch');
-      throw new UnauthorizedException('Invalid credentials');
+    try {
+      const res = await this.SupabaseService.signIn(
+        normalizedEmail,
+        dto.password,
+      );
+      if (res.user) {
+        console.log(res.user.email);
+        const user = await this.SupabaseService.getClient()
+          .from('users')
+          .select('*')
+          .eq('email', res.user.email)
+          .single();
+        if (!user) throw new InternalServerErrorException();
+        return user.data.id;
+      }
+    } catch (error) {
+      console.log('supabase failed auth', error);
+      throw new UnauthorizedException(error);
     }
-
-    return this.toSafeUser(user); //toSafeUser will block fetching passwordHash.
-    // Even though passwordHash is not fetchable by default ({select: false})
-    // this specific function, for example, allowed selecting to check password equal
-    // it will expose passwordHash if I just return user
+    return;
   }
 
   // --- Session establishment (security: regenerate) ---
-  async establishSession(req: AuthedRequest, userId: number) {
+  async establishSession(req: AuthedRequest, userId: string) {
     // Regenerate to prevent session fixation attacks
     await new Promise<void>((resolve, reject) => {
       req.session.regenerate((err: any) => (err ? reject(err) : resolve()));
@@ -107,13 +116,13 @@ export class AuthService {
     });
   }
 
-  async getSafeUserById(userId: number) {
-    const user = await this.users.findOne({ where: { id: userId } });
+  async getSafeUserById(userId: string) {
+    const user = await this.SupabaseService.getUserById(userId);
     if (!user) throw new UnauthorizedException();
     return this.toSafeUser(user);
   }
 
-  private toSafeUser(user: User) {
+  private toSafeUser(user: any) {
     // passwordHash is usually not present due to select:false, but never return it anyway
     console.log('tosafeuser called');
     return {

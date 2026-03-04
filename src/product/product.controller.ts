@@ -1,24 +1,24 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { FurnitureService } from './furniture.service';
+import { ProductService } from './product.service';
 import { SessionAuthGuard } from 'src/auth/session-auth.guard';
 import { UseGuards } from '@nestjs/common';
-@Controller('furniture')
-export class FurnitureController {
-  constructor(private readonly furnitureService: FurnitureService) {}
+@Controller('product')
+export class ProductController {
+  constructor(private readonly productService: ProductService) {}
 
   @UseGuards(SessionAuthGuard)
   @Get('search') //query param
   search(@Query() query: any) {
-    return this.furnitureService.search(query);
+    return this.productService.search(query);
   }
   @UseGuards(SessionAuthGuard)
   @Get('search-review')
   findAll(@Query() query: any) {
-    return this.furnitureService.findReview(query);
+    return this.productService.findReview(query);
   }
 
   @Get(':id') //route param
   findOne(@Param('id') id: string) {
-    return this.furnitureService.findOne(id);
+    return this.productService.findOne(id);
   }
 }

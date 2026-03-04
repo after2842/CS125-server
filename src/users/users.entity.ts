@@ -7,15 +7,12 @@ import {
 } from 'typeorm';
 
 @Entity()
-export class User {
+export class Users {
   @PrimaryGeneratedColumn()
   id: number;
 
   @Column({ unique: true })
   email: string;
-
-  @Column({ select: false })
-  passwordHash: string;
 
   @Column()
   name: string;

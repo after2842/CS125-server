@@ -1,4 +1,10 @@
-import { IsEmail, IsString, MinLength, MaxLength } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  MinLength,
+  MaxLength,
+  IsOptional,
+} from 'class-validator';
 
 export class SignupDto {
   @IsEmail()
@@ -6,13 +12,19 @@ export class SignupDto {
 
   @IsString()
   @MinLength(8)
-  @MaxLength(72) // bcrypt practical limit
+  @MaxLength(72)
   password!: string;
 
   @IsString()
   @MinLength(1)
   @MaxLength(120)
   name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(6)
+  @MaxLength(6)
+  code!: string;
 }
 
 export class LoginDto {
