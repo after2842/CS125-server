@@ -16,7 +16,11 @@ export class ProductController {
   findAll(@Query() query: any) {
     return this.productService.findReview(query);
   }
-
+  @UseGuards(SessionAuthGuard)
+  @Get('try-on')
+  virtualTryOn(@Query() query: any) {
+    return this.productService.virtualTryOn(query);
+  }
   @Get(':id') //route param
   findOne(@Param('id') id: string) {
     return this.productService.findOne(id);

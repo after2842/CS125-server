@@ -129,6 +129,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       name: user.name,
+      is_connected: user.is_connected,
       // createdAt: user.createdAt,
       // updatedAt: user.updatedAt,
     };

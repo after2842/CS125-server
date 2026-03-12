@@ -3,12 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
 import { Product } from './product.entity';
 import { IntentService } from '../search/intent.service';
+import { VirtualTryOnService } from './virtual-try-on.service';
 @Injectable()
 export class ProductService {
   constructor(
     @InjectRepository(Product)
     private readonly repo: Repository<Product>,
     private readonly intentService: IntentService,
+    private readonly virtualTryOnService: VirtualTryOnService,
   ) {}
 
   async search(query: any) {
@@ -108,5 +110,17 @@ export class ProductService {
     console.log(data, '✅ the specific route param');
 
     return { id: data._id, ...data._source };
+  }
+
+  async virtualTryOn(query: {
+    sourceImageUrl: string;
+    garmentImageUrl: string;
+    garmentClass?: 'UPPER_BODY' | 'LOWER_BODY' | 'FULL_BODY';
+  }) {
+    return this.virtualTryOnService.virtualTryOn(
+      query.sourceImageUrl,
+      query.garmentImageUrl,
+      query.garmentClass || 'UPPER_BODY',
+    );
   }
 }
