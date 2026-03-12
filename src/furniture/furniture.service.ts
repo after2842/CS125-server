@@ -3,11 +3,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
 import { Furniture } from './furniture.entity';
 import { IntentService } from '../search/intent.service';
+import { User } from '../user/user.entity';
 @Injectable()
 export class FurnitureService {
   constructor(
     @InjectRepository(Furniture)
     private readonly repo: Repository<Furniture>,
+
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
+
     private readonly intentService: IntentService,
   ) {}
 
@@ -79,15 +84,18 @@ export class FurnitureService {
     return await this.repo.findOne({ where: { id } });
   }
 
-  async recommend({ preferences, context, limit = 10 }) {
+  async recommend(userId: number, { preferences, context, limit = 10 }) {
+    
+    const user = await this.userRepo.findOne({ where: { id: userId } });       
     const items = await this.repo.find();
-
     const scored = items.map((item) => {
       let score = 0;
       const why: string[] = [];
 
       const type = context?.type?.toLowerCase(); // "sofa" | "chair" | "bed" | "lighting"
-      const aesthetic = context?.aesthetic?.toLowerCase(); // "modern" | "scandi" | "industrial" | "boho"
+      const aesthetic =
+        user?.favoriteAesthetic?.toLowerCase() ||
+        context?.aesthetic?.toLowerCase(); // "modern" | "scandi" | "industrial" | "boho" 
       const roomWidth = Number(context?.roomWidth); // user room width
       const maxBudget = Number(preferences?.maxBudget);
 

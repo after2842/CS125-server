@@ -25,4 +25,19 @@ export class User {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column({ nullable: true })
+  favoriteAesthetic: string;
+
+  @Column({ default: 0 })
+  modernClicks: number;
+
+  @Column({ default: 0 })
+  scandiClicks: number;
+
+  @Column({ default: 0 })
+  industrialClicks: number;
+
+  @Column({ default: 0 })
+  bohoClicks: number;
 }
