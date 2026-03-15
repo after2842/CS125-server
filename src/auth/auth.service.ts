@@ -56,6 +56,7 @@ export class AuthService {
         'email',
       );
       if (data.user) {
+        console.log('datauser');
         // otp is correct
         const { data, error } = await this.SupabaseService.getClient() // we retrieve that specific row, because now the row for this user is a complete row of Users(and also verified )
           .from('users')
@@ -65,7 +66,7 @@ export class AuthService {
         if (error) {
           throw new InternalServerErrorException(error);
         }
-        return data.user;
+        return data;
       } else {
         throw new UnauthorizedException('Wrong OTP');
       }

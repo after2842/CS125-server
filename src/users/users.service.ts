@@ -8,6 +8,10 @@ import { z } from 'zod';
 import { zodTextFormat } from 'openai/helpers/zod';
 import * as bcrypt from 'bcryptjs';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  BedrockRuntimeClient,
+  InvokeModelCommand,
+} from '@aws-sdk/client-bedrock-runtime';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -15,6 +19,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 @Injectable()
 export class UserService {
   private s3Client: S3Client;
+  private bedrockClient: BedrockRuntimeClient;
   private readonly bucketName = 'furnfitdemo';
 
   constructor(
@@ -23,6 +28,7 @@ export class UserService {
     private readonly supabaseService: SupabaseService,
   ) {
     this.s3Client = new S3Client({ region: 'us-west-2' });
+    this.bedrockClient = new BedrockRuntimeClient({ region: 'us-east-1' });
   }
 
   private async downloadImage(url: string): Promise<Buffer> {
@@ -61,7 +67,7 @@ export class UserService {
     console.log(`   URL: ${url}`);
     return url;
   }
-
+  // download images => upload s3 AND write DB
   async uploadUserProfileImages(
     userId: string,
     imageUrls: string[],
@@ -115,7 +121,7 @@ export class UserService {
     return uploadedUrls;
   }
 
-  async retrieveIG(query: any, userId: string) {
+  async syncIG(query: any, userId: string) {
     console.log('retrieve IG called', query?.usrname);
     const usrId = query?.usrname;
     const TOKEN = process.env.APIFY_TOKEN;
@@ -153,9 +159,31 @@ export class UserService {
       } else {
         console.log('✅ Updated users.is_connected = true');
       }
+
+      // Write IG username to instagram_accounts
+      const { error: igError } = await supabase
+        .from('instagram_accounts')
+        .upsert({ id: userId, account: usrId }, { onConflict: 'id' });
+
+      if (igError) {
+        console.error('❌ Failed to save IG username:', igError);
+      } else {
+        console.log('✅ Saved IG username:', usrId);
+      }
     }
 
-    // Return generic success response
+    // Fire-and-forget Nova analysis — don't block the response
+    if (uploadedUrls.length) {
+      this.analyzePreferenceWithNova(userId, uploadedUrls).catch((err) =>
+        console.error('analyzePreferenceWithNova failed:', err),
+      );
+      this.generateImageRecommendations(userId, uploadedUrls)
+        .then(() => this.embedAndStoreRecommendations(userId))
+        .catch((err) =>
+          console.error('generateImageRecommendations failed:', err),
+        );
+    }
+
     return {
       success: true,
       message: 'Images uploaded successfully',
@@ -163,141 +191,351 @@ export class UserService {
     };
   }
 
-  async analyzeStyle(posts: any) {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_APIKEY });
-    let globalImageIndex = 0;
-    const imageMetaData = posts
-      .flatMap((post, postIdx) =>
-        post.images.map((img) => {
-          const metadata = `Image ${globalImageIndex}'s metadata: \nID: ${post.id} \nshortCode ${post.shortCode} \nPostedTime: ${post.timestamp}\n\n`;
-          globalImageIndex++;
-          return metadata;
-        }),
-      )
-      .join('');
-    const images = posts.flatMap((post) => post.images);
-    const imageObjects = images.map((url) => ({
-      type: 'input_image',
-      image_url: url,
-    }));
-    // 1) Define a small, robust schema
-    const Score01 = z
-      .number()
-      .min(0)
-      .max(1)
-      .describe('A score from 0.0 to 1.0 inclusive.');
-
-    const EvidenceItem = z.object({
-      post_shortcode: z
-        .string()
-        .describe('Instagram post shortCode (e.g., C2EJ4MxrHzd).'),
-      excerpt: z
-        .string()
-        .max(240)
-        .describe('Short snippet supporting the claim.'),
-    });
-
-    const ScoredClaim = z.object({
-      label: z
-        .string()
-        .describe(
-          'A short name for the trait being scored (snake_case recommended).',
-        ),
-      score: Score01.describe('How strongly the trait appears.'),
-      confidence: Score01.describe(
-        'How confident the model is, based on evidence.',
-      ),
-      evidence_refs: z
-        .array(z.string())
-        .describe(
-          'List of EvidenceItem.ref_id values that support this claim.',
-        ),
-    });
-
-    const InstagramStyleProfile = z.object({
-      username: z.string().describe('The Instagram username being analyzed.'),
-      summary: z
-        .string()
-        .describe("2-3 sentence summary of the user's style and vibe."),
-      aesthetic_archetypes: z
-        .array(ScoredClaim)
-        .describe('Core fashion archetypes/subcultures with scores.'),
-      lifestyle_and_occasion: z
-        .array(ScoredClaim)
-        .describe(
-          'Occasion/lifestyle signals inferred from captions/comments/alt.',
-        ),
-      color_and_pattern_affinity: z
-        .array(ScoredClaim)
-        .describe(
-          "Color/pattern preferences (avoid pixel claims if you didn't analyze pixels).",
-        ),
-      evidence_index: z
-        .array(EvidenceItem)
-        .min(1)
-        .describe('All evidence items referenced by evidence_refs.'),
-      overall_confidence: Score01.describe(
-        'Overall confidence in this profile.',
-      ),
-      missing_data: z
-        .array(z.string())
-        .describe(
-          "What you'd need next to improve accuracy (e.g., pixel analysis, brand tags).",
-        ),
-    });
-
-    // 2) Call Responses API with Structured Outputs
-
-    const response = await openai.responses.parse({
-      model: 'gpt-5-mini-2025-08-07',
-      input: [
-        {
-          role: 'system',
-          content: [
-            "You extract a user's style preferences from Instagram post metadata.",
-            'Use images primarily, and use timestamp as reference.',
-            'If information is missing, keep scores low and add a note in missing_data.',
-            'Every ScoredClaim must reference evidence_index via evidence_refs.',
-          ].join('\n'),
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text:
-                'The order of images and imageMetaData are the same\n\n' +
-                imageMetaData,
-            },
-            ...imageObjects,
-          ],
-        },
-      ],
-      text: {
-        format: zodTextFormat(InstagramStyleProfile, 'instagram_style_profile'),
-      },
-    });
-
-    console.log(response.output_parsed);
-    // Parsed & validated output
-    return response.output_parsed;
-
-    // Example usage
-    // const profile = await extractStyleProfile(postsArrayYouShared, "el0lse");
-    // console.log(profile);
-  }
-  async getUserProfileImages(userId: string): Promise<string[]> {
+  async getUserProfileImages(
+    userId: string,
+  ): Promise<{ url: string; nice_words?: string }[]> {
+    console.log('retrieve usr all img✅🧑‍🎓');
     const supabase = this.supabaseService.getClient();
-    const { data, error } = await supabase
-      .from('users_profile_images')
-      .select('url')
-      .eq('users_id', userId);
-
+    const { data, error } = await supabase.rpc('random_profile_images', {
+      p_user_id: userId,
+    });
     if (error) {
       throw new Error(error.message);
     }
+    console.log(data);
+    return (data ?? []).map((row: { url: string; nice_words?: string }) => ({
+      url: row.url,
+      nice_words: row.nice_words,
+    }));
+  }
 
-    return (data ?? []).map((row: { url: string }) => row.url);
+  async analyzePreferenceWithNova(userId: string, imageUrls?: string[]) {
+    let urls: string[];
+    if (imageUrls?.length) {
+      urls = imageUrls;
+    } else {
+      const imageEntries = await this.getUserProfileImages(userId);
+      urls = imageEntries.map((entry) => entry.url);
+    }
+    if (!urls.length) return { preferences: null, message: 'No images found' };
+
+    const selectedUrls = urls.slice(0, 10);
+
+    // Download images and build content blocks with labeled indices
+    const imageContents: any[] = [];
+    for (let i = 0; i < selectedUrls.length; i++) {
+      const buf = await this.downloadImage(selectedUrls[i]);
+      imageContents.push(
+        { text: `[Image ${i}] url: ${selectedUrls[i]}` },
+        {
+          image: {
+            format: 'jpeg' as const,
+            source: { bytes: buf.toString('base64') },
+          },
+        },
+      );
+    }
+
+    const prompt = `You are an expert fashion analyst. Analyze the user's photos and return a single JSON object.
+
+RULES:
+- Pick exactly ONE value from each category that BEST describes this user overall.
+- For each image, write a 1-2 sentence summary focused on the outfit and occasion.
+- Pick exactly ONE image as "is_featured": true — the photo that shows the most of the user's body (full-body or near-full-body) and would work best as a reference for virtual try-on. All others must be false.
+- Respond ONLY with valid JSON. No markdown, no explanation.
+
+AESTHETIC_ARCHETYPE (pick one):
+minimal, classic_polished, quiet_luxury, romantic_feminine, bohemian, preppy, streetwear, sporty, scandi, edgy, vintage_retro, eclectic_maximalist
+
+LIFESTYLE_OCCASION (pick one):
+everyday_casual, work_office, date_night, cocktail_party, wedding_guest, vacation_resort, brunch_social, festival_event, active_outdoor, formal_event
+
+COLOR_PATTERN_AFFINITY (pick one):
+neutral, monochrome, earthy, pastel, jewel_toned, vivid_bright, solid_minimal, stripe_check_geometric, floral_botanical, animal_print
+
+REQUIRED JSON SCHEMA:
+{
+  "aesthetic_archetype": "<one value from above>",
+  "lifestyle_occasion": "<one value from above>",
+  "color_pattern_affinity": "<one value from above>",
+  "images": [
+    {
+      "url": "<the image url>",
+      "short_summary": "<1-2 sentence outfit & occasion description>",
+      "is_featured": <true for exactly one image, false for all others>
+    }
+  ]
+}`;
+
+    const body = {
+      messages: [
+        {
+          role: 'user',
+          content: [...imageContents, { text: prompt }],
+        },
+      ],
+      inferenceConfig: {
+        maxTokens: 2048,
+        temperature: 0.2,
+      },
+    };
+
+    const command = new InvokeModelCommand({
+      modelId: 'amazon.nova-pro-v1:0',
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify(body),
+    });
+
+    const response = await this.bedrockClient.send(command);
+    const raw = JSON.parse(new TextDecoder().decode(response.body));
+    const text = raw?.output?.message?.content?.[0]?.text ?? '';
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      console.error('Nova returned non-JSON:', text);
+      return { raw: text };
+    }
+
+    // Write to DB
+    const supabase = this.supabaseService.getClient();
+
+    // 1. Upsert users_profile
+    const { error: profileError } = await supabase.from('users_profile').upsert(
+      {
+        id: userId,
+        aesthetic_archetype: parsed.aesthetic_archetype,
+        lifestyle_occasion: parsed.lifestyle_occasion,
+        color_pattern_affinity: parsed.color_pattern_affinity,
+      },
+      { onConflict: 'id' },
+    );
+    if (profileError) {
+      console.error('Failed to upsert users_profile:', profileError);
+    }
+
+    // 2. Update each users_profile_images row
+    if (Array.isArray(parsed.images)) {
+      for (const img of parsed.images) {
+        const { error: imgError } = await supabase
+          .from('users_profile_images')
+          .update({
+            short_summary: img.short_summary,
+            is_featured: img.is_featured ?? false,
+          })
+          .eq('users_id', userId)
+          .eq('url', img.url);
+
+        if (imgError) {
+          console.error(`Failed to update image ${img.url}:`, imgError);
+        }
+      }
+    }
+
+    return parsed;
+  }
+
+  /**
+   * For each user image, ask Nova Pro to generate:
+   *  - recommendation: descriptive apparel text (for later embedding + vector search)
+   *  - nice_words: a fun catch-phrase / compliment
+   * Images are batched (5 per request) to stay within Nova Pro's context window.
+   */
+  async generateImageRecommendations(userId: string, imageUrls?: string[]) {
+    const supabase = this.supabaseService.getClient();
+
+    // 1. Resolve image list — use provided URLs or fetch from DB
+    let imageList: { url: string }[];
+    if (imageUrls?.length) {
+      imageList = imageUrls.map((url) => ({ url }));
+    } else {
+      const { data, error } = await supabase
+        .from('users_profile_images')
+        .select('url')
+        .eq('users_id', userId);
+      if (error) throw new Error(error.message);
+      imageList = data ?? [];
+    }
+
+    if (!imageList.length) return { count: 0, message: 'No images found' };
+
+    const BATCH_SIZE = 5;
+    const results: any[] = [];
+
+    for (let i = 0; i < imageList.length; i += BATCH_SIZE) {
+      const batch = imageList.slice(i, i + BATCH_SIZE);
+
+      // Download images and build content blocks
+      const imageContents: any[] = [];
+      for (let j = 0; j < batch.length; j++) {
+        const buf = await this.downloadImage(batch[j].url);
+        imageContents.push(
+          { text: `[Image ${j}] url: ${batch[j].url}` },
+          {
+            image: {
+              format: 'jpeg' as const,
+              source: { bytes: buf.toString('base64') },
+            },
+          },
+        );
+      }
+
+      const prompt = `You are a witty, warm fashion stylist and personal shopper.
+
+For each image, produce THREE things:
+
+1. "nice_words" — a short, fun catch-phrase (1-2 sentences) that compliments the person or scene and ties into a fashion vibe. Be creative, playful, and encouraging. If the photo isn't about fashion (landscape, food, pets, etc.), still connect it to a style suggestion in a fun way.
+
+2. "recommendation" — a short description of apparel and accessories that would suit this person or complement this scene. Be specific about garment types, colors, fabrics, styles, and occasions. This text will be used for semantic search later, so be descriptive with fashion vocabulary — mention silhouettes, materials, color palettes, vibes, and occasions. It should be LESS THAN 70 characters.
+
+3. "reason" — a very short, punchy phrase (10-35 characters STRICTLY) explaining WHY you picked this recommendation for this person/scene. Connect the user's vibe, mood, or setting directly to the suggested style. Make it feel personal — not generic. Think of it as a tiny headline the user sees above their recommendations.
+
+Examples of the tone and detail expected:
+
+Photo of a park on a sunny day:
+  nice_words: "Nice sunny day! Guess not as sunny as you are though."
+  recommendation: "A spring-toned linen blouse in soft peach or lavender, paired with high-waisted cotton shorts and woven espadrilles."
+  reason: "Sun-kissed park vibes"
+
+Person in a casual outfit at a coffee shop:
+  nice_words: "Coffee and good vibes — your aesthetic is effortlessly cool."
+  recommendation: "Relaxed-fit camel crewneck sweater layered over a white collared shirt, dark wash straight-leg jeans, and clean white sneakers."
+  reason: "Your cozy café energy"
+
+Person at a beach:
+  nice_words: "Making waves and looking like the main character."
+  recommendation: "Breezy oversized linen shirt in ivory left unbuttoned over a fitted ribbed tank, with relaxed drawstring trousers."
+  reason: "Coastal main character"
+
+Person posing by a Christmas tree in a girly outfit:
+  nice_words: "Tis the season to slay!"
+  recommendation: "Soft pink satin blouse with pearl buttons, a pleated midi skirt in blush, and pointed-toe kitten heels."
+  reason: "Princess in pink for Xmas"
+
+Respond ONLY with valid JSON. No markdown fences, no extra text.
+
+{
+  "images": [
+    {
+      "url": "<the url from the image label>",
+      "nice_words": "<catch phrase>",
+      "recommendation": "<apparel recommendation>",
+      "reason": "<10-35 char why phrase>"
+    }
+  ]
+}`;
+
+      const body = {
+        messages: [
+          {
+            role: 'user',
+            content: [...imageContents, { text: prompt }],
+          },
+        ],
+        inferenceConfig: {
+          maxTokens: 2048,
+          temperature: 0.7,
+        },
+      };
+
+      const command = new InvokeModelCommand({
+        modelId: 'amazon.nova-pro-v1:0',
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify(body),
+      });
+
+      console.log(
+        `🧠 [Nova] Sending batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} images)...`,
+      );
+
+      const response = await this.bedrockClient.send(command);
+      const raw = JSON.parse(new TextDecoder().decode(response.body));
+      const text = raw?.output?.message?.content?.[0]?.text ?? '';
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        console.error(
+          `Nova returned non-JSON for batch starting at index ${i}:`,
+          text,
+        );
+        continue;
+      }
+
+      // Write each result to DB
+      if (Array.isArray(parsed.images)) {
+        for (const img of parsed.images) {
+          const { error: updateError } = await supabase
+            .from('users_profile_images')
+            .update({
+              recommendation: img.recommendation,
+              nice_words: img.nice_words,
+              reason: img.reason,
+            })
+            .eq('users_id', userId)
+            .eq('url', img.url);
+
+          if (updateError) {
+            console.error(`Failed to update image ${img.url}:`, updateError);
+          } else {
+            results.push(img);
+          }
+        }
+      }
+    }
+
+    console.log(
+      `✅ [Nova] Done. Updated ${results.length}/${imageList.length} images.`,
+    );
+    return { count: results.length, images: results };
+  }
+
+  private async embedAndStoreRecommendations(userId: string) {
+    const supabase = this.supabaseService.getClient();
+    const { data: images, error } = await supabase
+      .from('users_profile_images')
+      .select('url, recommendation')
+      .eq('users_id', userId)
+      .not('recommendation', 'is', null);
+
+    if (error || !images?.length) return;
+
+    const embedUrl = process.env.RUNPOD_URL_EMBED;
+    const apiKey = process.env.RUNPOD_API_KEY;
+    if (!embedUrl || !apiKey) {
+      console.error('❌ Missing RUNPOD_URL_EMBED or RUNPOD_API_KEY');
+      return;
+    }
+
+    for (const img of images) {
+      try {
+        const res = await fetch(embedUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ text: img.recommendation }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!res.ok) continue;
+        const { embedding } = await res.json();
+
+        await supabase
+          .from('users_profile_images')
+          .update({ recommendation_embedding: embedding })
+          .eq('users_id', userId)
+          .eq('url', img.url);
+
+        console.log(`✅ Embedded recommendation for ${img.url}`);
+      } catch (err: any) {
+        console.error(`Embed failed for ${img.url}: ${err.message}`);
+      }
+    }
   }
 
   async history() {

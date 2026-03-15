@@ -20,10 +20,10 @@ export class UserController {
   }
 
   @UseGuards(SessionAuthGuard)
-  @Get('get-ig')
+  @Get('sync-ig')
   async getIG(@Query() query: any, @Req() request: any) {
     const userId = request.session.userId;
-    return this.userService.retrieveIG(query, userId);
+    return this.userService.syncIG(query, userId);
   }
 
   @UseGuards(SessionAuthGuard)

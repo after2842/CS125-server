@@ -34,12 +34,12 @@ export class AuthController {
   // supabase otp will verify the hash.
   @Post('signup/verify')
   async signupVerify(@Req() req: AuthedRequest, @Body() dto: SignupDto) {
-    const user = await this.authService.signupVerify(dto);
-    if (user.id) {
+    const data = await this.authService.signupVerify(dto);
+    if (data.id) {
       // auto login => write the session JS object and write Redis right after creating a new User row.
       // so the client will receive the session id as it finished signup proccess
-      await this.authService.establishSession(req, user.id);
-      console.log(user.id);
+      await this.authService.establishSession(req, data.id);
+      console.log(data.id);
 
       return { message: 'OTP successful' };
     } else {

@@ -103,7 +103,7 @@ export class VirtualTryOnService {
           referenceImage: garmentImg,
           maskType: 'GARMENT',
           garmentBasedMask: {
-            garmentClass,
+            garmentClass: garmentClass,
           },
         },
         imageGenerationConfig: {
@@ -113,6 +113,7 @@ export class VirtualTryOnService {
       };
 
       // 4. Call Amazon Nova Canvas
+      console.log('fire the api to nova');
       const command = new InvokeModelCommand({
         modelId: 'amazon.nova-canvas-v1:0',
         body: JSON.stringify(nativeRequest),
@@ -127,7 +128,7 @@ export class VirtualTryOnService {
           HttpStatus.INTERNAL_SERVER_ERROR,
         );
       }
-
+      console.log('nova try on task ended');
       // 5. Decode result image
       const resultImageBuffer = Buffer.from(responseBody.images[0], 'base64');
 
